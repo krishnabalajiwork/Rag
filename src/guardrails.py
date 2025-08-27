@@ -220,10 +220,14 @@ class GuardrailsManager:
             
             citations.append(citation)
             sources.append(f"[{i}] {filename} (Page {page_number})")
-        
-        # Add citation references to answer if not present
-        if citations and not any(f"[{i}]" in answer for i in range(1, len(citations) + 1)):
-            answer += f"\n\nSources: {', '.join([f'[{c[\"id\"]}]' for c in citations])}"
+
+        # --- REPLACE WITH THIS BLOCK ---
+            # Add citation references to answer if not present
+
+    if citations and not any(f"[{c['id']}]" in answer for c in citations):
+        sources_text = ", ".join([f"[{c['id']}]" for c in citations])
+        answer += f"\n\nSources: {sources_text}"
+       
         
         return {
             'answer': answer,
