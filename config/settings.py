@@ -1,6 +1,6 @@
 import os
 from typing import List, Optional
-from pydantic_settings import BaseSettings
+from pydantic import BaseSettings
 
 class Settings(BaseSettings):
     # Elasticsearch Configuration
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     top_k: int = 5
     
     # LLM Configuration
-    llm_model_name: str = "microsoft/DialoGPT-medium"
+    llm_model_name: str = "google/flan-t5-small"
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     
     # API Configuration
