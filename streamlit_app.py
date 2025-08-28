@@ -5,6 +5,11 @@ import time
 from typing import Dict, Any, List
 import logging
 
+
+es_url = st.secrets["ELASTICSEARCH_URL"]
+es_user = st.secrets["ELASTICSEARCH_USERNAME"]
+es_pass = st.secrets["ELASTICSEARCH_PASSWORD"]
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
