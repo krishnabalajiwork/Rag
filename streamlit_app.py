@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
-    page_title="RAG System - Document Q&A",
+    page_title="RAG System - Upload Documents",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -67,288 +67,92 @@ st.markdown("""
 class RAGInterface:
     def __init__(self):
         self.api_base_url = API_BASE_URL
-
-    def call_api(self, endpoint: str, method: str = "GET", data: Optional[Dict] = None) -> Dict[str, Any]:
-        """Make API calls with error handling"""
+        
+    def call_api(self, endpoint: str, method: str = "GET", data: Optional[dict] = None, files: Optional[list] = None) -> Dict[str, Any]:
         url = f"{self.api_base_url}{endpoint}"
-
         try:
             if method == "GET":
                 response = requests.get(url, timeout=30)
             elif method == "POST":
-                response = requests.post(url, json=data, timeout=30)
+                if files:
+                    response = requests.post(url, files=files, data=data, timeout=60)
+                else:
+                    response = requests.post(url, json=data, timeout=30)
             elif method == "DELETE":
                 response = requests.delete(url, timeout=30)
             else:
                 raise ValueError(f"Unsupported method: {method}")
-
             response.raise_for_status()
             return response.json()
-
-        except requests.exceptions.ConnectionError:
-            return {"error": "Cannot connect to the API server. Please make sure the FastAPI server is running."}
-        except requests.exceptions.Timeout:
-            return {"error": "Request timed out. Please try again."}
-        except requests.exceptions.HTTPError as e:
-            return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
         except Exception as e:
-            return {"error": f"Unexpected error: {str(e)}"}
+            return {"error": str(e)}
 
+    def ingest_documents(self, files) -> Dict[str, Any]:
+        file_data = []
+        for uploaded_file in files:
+            file_data.append(("files", (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)))
+        return self.call_api("/ingest", method="POST", files=file_data)
+    
     def get_health_status(self) -> Dict[str, Any]:
-        """Get system health status"""
         return self.call_api("/healthz")
 
-    def get_system_status(self) -> Dict[str, Any]:
-        """Get detailed system status"""
-        return self.call_api("/status")
-
-    def query_documents(self, question: str, retrieval_mode: str = "hybrid", top_k: int = 5) -> Dict[str, Any]:
-        """Query the RAG system"""
-        data = {
-            "question": question,
-            "retrieval_mode": retrieval_mode,
-            "top_k": top_k
-        }
-        return self.call_api("/query", method="POST", data=data)
-
-    def ingest_documents(self, folder_id: Optional[str] = None) -> Dict[str, Any]:
-        """Ingest documents from Google Drive"""
-        data = {"folder_id": folder_id} if folder_id else {}
-        return self.call_api("/ingest", method="POST", data=data)
-
-    def delete_documents(self) -> Dict[str, Any]:
-        """Delete all documents"""
-        return self.call_api("/documents", method="DELETE")
-
 def initialize_session_state():
-    """Initialize session state variables"""
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
     if "system_status" not in st.session_state:
         st.session_state.system_status = None
     if "rag_interface" not in st.session_state:
-        st.session_state.rag_interface = RAGInterface() 
+        st.session_state.rag_interface = RAGInterface()
+    if "uploaded_files" not in st.session_state:
+        st.session_state.uploaded_files = []
 
 def display_system_status():
-    """Display system status in sidebar"""
     st.sidebar.header("🔍 System Status")
-
-    # Get status
     status = st.session_state.rag_interface.get_health_status()
-
     if "error" not in status:
         if status.get("status") == "healthy":
             st.sidebar.markdown("""
             <div class="status-box status-healthy">
                 <strong>✅ System Healthy</strong><br>
                 All components operational
-            </div>
-            """, unsafe_allow_html=True)
+            </div>""", unsafe_allow_html=True)
         else:
             st.sidebar.markdown("""
             <div class="status-box status-unhealthy">
                 <strong>⚠️ System Issues</strong><br>
                 Some components may be offline
-            </div>
-            """, unsafe_allow_html=True)
-
-        # Display component status
-        st.sidebar.subheader("Components")
-        components = {
-            "Elasticsearch": status.get("elasticsearch", False),
-            "LLM Model": status.get("llm_model", False),
-            "Embedding Model": status.get("embedding_model", False)
-        }
-
-        for component, is_healthy in components.items():
-            emoji = "✅" if is_healthy else "❌"
-            st.sidebar.write(f"{emoji} {component}")
-
-        # Document count
-        doc_count = status.get("document_count", 0)
-        st.sidebar.metric("Documents Indexed", doc_count)
-
+            </div>""", unsafe_allow_html=True)
     else:
         st.sidebar.error(f"Status check failed: {status['error']}")
 
-def display_document_management():
-    """Display document management section"""
-    st.sidebar.header("📚 Document Management")
-
-    # Document ingestion
-    st.sidebar.subheader("Ingest Documents")
-
-    folder_id = st.sidebar.text_input(
-        "Google Drive Folder ID",
-        help="Leave empty to use default folder from settings"
+def main():
+    st.markdown('<div class="main-header">📄 Upload Documents (Max 20 PDF files)</div>', unsafe_allow_html=True)
+    initialize_session_state()
+    display_system_status()
+    
+    uploaded_files = st.file_uploader(
+        label="Upload PDF Documents",
+        type=["pdf"],
+        accept_multiple_files=True,
+        help="You can upload up to 20 PDF files",
+        key="file_uploader"
     )
+    if uploaded_files:
+        if len(uploaded_files) > 20:
+            st.error("You can upload a maximum of 20 files at a time. Please reduce the number of files.")
+            return
+        st.session_state.uploaded_files = uploaded_files
 
-    if st.sidebar.button("🔄 Ingest Documents", type="secondary"):
-        with st.spinner("Ingesting documents..."):
-            result = st.session_state.rag_interface.ingest_documents(folder_id if folder_id else None)
-
+    if st.button("📤 Upload & Process") and st.session_state.uploaded_files:
+        with st.spinner("Uploading and processing documents..."):
+            result = st.session_state.rag_interface.ingest_documents(st.session_state.uploaded_files)
             if "error" not in result:
                 if result.get("success"):
-                    st.sidebar.success(f"✅ {result['message']}")
+                    st.success(f"✅ {result['message']}")
                 else:
-                    st.sidebar.error(f"❌ {result['message']}")
+                    st.error(f"❌ {result['message']}")
             else:
-                st.sidebar.error(f"❌ {result['error']}")
-
-    # Document deletion
-    st.sidebar.subheader("Reset System")
-    if st.sidebar.button("🗑️ Delete All Documents", type="secondary"):
-        if st.sidebar.checkbox("I understand this will delete all documents"):
-            with st.spinner("Deleting documents..."):
-                result = st.session_state.rag_interface.delete_documents()
-
-                if "error" not in result:
-                    if result.get("success"):
-                        st.sidebar.success("✅ All documents deleted")
-                    else:
-                        st.sidebar.error(f"❌ {result['message']}")
-                else:
-                    st.sidebar.error(f"❌ {result['error']}")
-
-def display_query_settings():
-    """Display query settings"""
-    st.sidebar.header("⚙️ Query Settings")
-
-    retrieval_mode = st.sidebar.selectbox(
-        "Retrieval Mode",
-        ["hybrid", "elser_only", "bm25_only"],
-        index=0,
-        help="Choose the retrieval strategy"
-    )
-
-    top_k = st.sidebar.slider(
-        "Number of Documents",
-        min_value=1,
-        max_value=10,
-        value=5,
-        help="Number of documents to retrieve"
-    )
-
-    return retrieval_mode, top_k
-
-def display_chat_interface():
-    """Display the main chat interface"""
-    st.markdown('<div class="main-header">🤖 RAG System - Document Q&A</div>', unsafe_allow_html=True)
-
-    # Description
-    st.markdown("""
-    Welcome to the RAG (Retrieval-Augmented Generation) system! Ask questions about your uploaded documents 
-    and get accurate, cited answers.
-
-    **Features:**
-    - 🔍 Hybrid search combining BM25, dense vectors, and ELSER
-    - 📚 Google Drive integration for document ingestion
-    - 🛡️ Built-in guardrails for safe and grounded responses
-    - 📎 Automatic citations with source links
-    """)
-
-    # Display conversation history
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-            # Display citations if available
-            if message["role"] == "assistant" and "citations" in message:
-                display_citations(message["citations"])
-
-def display_citations(citations: List[Dict]):
-    """Display citations in a formatted way"""
-    if not citations:
-        return
-
-    st.markdown("**Sources:**")
-    for citation in citations:
-        with st.expander(f"📄 {citation['filename']} (Page {citation.get('page_number', '?')})"):
-            st.markdown(f"**Relevance Score:** {citation.get('relevance_score', 0):.3f}")
-            st.markdown(f"**Snippet:** {citation['snippet']}")
-            if citation.get('url') and citation['url'] != '#':
-                st.markdown(f"[🔗 View Document]({citation['url']})")
-
-def main():
-    """Main application"""
-    initialize_session_state()
-
-    # Sidebar
-    display_system_status()
-    display_document_management()
-    retrieval_mode, top_k = display_query_settings()
-
-    # Main interface
-    display_chat_interface()
-
-    # Chat input
-    if prompt := st.chat_input("Ask a question about your documents..."):
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate response
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-
-            with st.spinner("Thinking..."):
-                # Query the RAG system
-                result = st.session_state.rag_interface.query_documents(
-                    question=prompt,
-                    retrieval_mode=retrieval_mode,
-                    top_k=top_k
-                )
-
-                if "error" not in result:
-                    if result.get("success"):
-                        answer = result["answer"]
-                        citations = result.get("citations", [])
-                        metadata = result.get("metadata", {})
-
-                        # Display answer
-                        message_placeholder.markdown(answer)
-
-                        # Display metadata
-                        with st.expander("🔍 Query Details"):
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Documents Found", metadata.get("documents_found", 0))
-                            with col2:
-                                st.metric("Confidence", f"{metadata.get('confidence', 0):.2f}")
-                            with col3:
-                                safety_status = "✅ Safe" if metadata.get("is_safe", False) else "⚠️ Filtered"
-                                st.metric("Safety", safety_status)
-
-                        # Display citations
-                        if citations:
-                            display_citations(citations)
-
-                        # Add assistant message to chat history
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": answer,
-                            "citations": citations,
-                            "metadata": metadata
-                        })
-
-                    else:
-                        error_msg = f"Query failed: {result.get('answer', 'Unknown error')}"
-                        message_placeholder.error(error_msg)
-                        st.session_state.messages.append({"role": "assistant", "content": error_msg})
-                else:
-                    error_msg = f"API Error: {result['error']}"
-                    message_placeholder.error(error_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": error_msg})
-
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; color: #666; padding: 1rem;">
-        RAG System v1.0 | Built with Elasticsearch, FastAPI, and Streamlit
-    </div>
-    """, unsafe_allow_html=True)
+                st.error(f"❌ Error: {result['error']}")
+    elif st.button("📤 Upload & Process"):
+        st.warning("Please upload PDF files before processing.")
 
 if __name__ == "__main__":
     main()
