@@ -2,13 +2,14 @@ import streamlit as st
 import requests
 import json
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 
-
-es_url = st.secrets["ELASTICSEARCH_URL"]
-es_user = st.secrets["ELASTICSEARCH_USERNAME"]
-es_pass = st.secrets["ELASTICSEARCH_PASSWORD"]
+# Use Streamlit secrets or fallback to environment variables
+API_BASE_URL = st.secrets.get("API_BASE_URL") or "http://localhost:8000"
+ES_URL = st.secrets.get("ELASTICSEARCH_URL", "")
+ES_USER = st.secrets.get("ELASTICSEARCH_USERNAME", "")
+ES_PASS = st.secrets.get("ELASTICSEARCH_PASSWORD", "")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -63,17 +64,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Configuration
-API_BASE_URL = "http://localhost:8000"  # Change this for deployment
-
 class RAGInterface:
     def __init__(self):
         self.api_base_url = API_BASE_URL
-        
-    def call_api(self, endpoint: str, method: str = "GET", data: Dict = None) -> Dict[str, Any]:
+
+    def call_api(self, endpoint: str, method: str = "GET", data: Optional[Dict] = None) -> Dict[str, Any]:
         """Make API calls with error handling"""
         url = f"{self.api_base_url}{endpoint}"
-        
+
         try:
             if method == "GET":
                 response = requests.get(url, timeout=30)
@@ -83,10 +81,10 @@ class RAGInterface:
                 response = requests.delete(url, timeout=30)
             else:
                 raise ValueError(f"Unsupported method: {method}")
-            
+
             response.raise_for_status()
             return response.json()
-            
+
         except requests.exceptions.ConnectionError:
             return {"error": "Cannot connect to the API server. Please make sure the FastAPI server is running."}
         except requests.exceptions.Timeout:
@@ -95,15 +93,15 @@ class RAGInterface:
             return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
         except Exception as e:
             return {"error": f"Unexpected error: {str(e)}"}
-    
+
     def get_health_status(self) -> Dict[str, Any]:
         """Get system health status"""
         return self.call_api("/healthz")
-    
+
     def get_system_status(self) -> Dict[str, Any]:
         """Get detailed system status"""
         return self.call_api("/status")
-    
+
     def query_documents(self, question: str, retrieval_mode: str = "hybrid", top_k: int = 5) -> Dict[str, Any]:
         """Query the RAG system"""
         data = {
@@ -112,12 +110,12 @@ class RAGInterface:
             "top_k": top_k
         }
         return self.call_api("/query", method="POST", data=data)
-    
-    def ingest_documents(self, folder_id: str = None) -> Dict[str, Any]:
+
+    def ingest_documents(self, folder_id: Optional[str] = None) -> Dict[str, Any]:
         """Ingest documents from Google Drive"""
         data = {"folder_id": folder_id} if folder_id else {}
         return self.call_api("/ingest", method="POST", data=data)
-    
+
     def delete_documents(self) -> Dict[str, Any]:
         """Delete all documents"""
         return self.call_api("/documents", method="DELETE")
@@ -129,15 +127,15 @@ def initialize_session_state():
     if "system_status" not in st.session_state:
         st.session_state.system_status = None
     if "rag_interface" not in st.session_state:
-        st.session_state.rag_interface = RAGInterface()
+        st.session_state.rag_interface = RAGInterface() 
 
 def display_system_status():
     """Display system status in sidebar"""
     st.sidebar.header("🔍 System Status")
-    
+
     # Get status
     status = st.session_state.rag_interface.get_health_status()
-    
+
     if "error" not in status:
         if status.get("status") == "healthy":
             st.sidebar.markdown("""
@@ -153,7 +151,7 @@ def display_system_status():
                 Some components may be offline
             </div>
             """, unsafe_allow_html=True)
-        
+
         # Display component status
         st.sidebar.subheader("Components")
         components = {
@@ -161,34 +159,34 @@ def display_system_status():
             "LLM Model": status.get("llm_model", False),
             "Embedding Model": status.get("embedding_model", False)
         }
-        
+
         for component, is_healthy in components.items():
             emoji = "✅" if is_healthy else "❌"
             st.sidebar.write(f"{emoji} {component}")
-        
+
         # Document count
         doc_count = status.get("document_count", 0)
         st.sidebar.metric("Documents Indexed", doc_count)
-        
+
     else:
         st.sidebar.error(f"Status check failed: {status['error']}")
 
 def display_document_management():
     """Display document management section"""
     st.sidebar.header("📚 Document Management")
-    
+
     # Document ingestion
     st.sidebar.subheader("Ingest Documents")
-    
+
     folder_id = st.sidebar.text_input(
         "Google Drive Folder ID",
         help="Leave empty to use default folder from settings"
     )
-    
+
     if st.sidebar.button("🔄 Ingest Documents", type="secondary"):
         with st.spinner("Ingesting documents..."):
             result = st.session_state.rag_interface.ingest_documents(folder_id if folder_id else None)
-            
+
             if "error" not in result:
                 if result.get("success"):
                     st.sidebar.success(f"✅ {result['message']}")
@@ -196,14 +194,14 @@ def display_document_management():
                     st.sidebar.error(f"❌ {result['message']}")
             else:
                 st.sidebar.error(f"❌ {result['error']}")
-    
+
     # Document deletion
     st.sidebar.subheader("Reset System")
     if st.sidebar.button("🗑️ Delete All Documents", type="secondary"):
         if st.sidebar.checkbox("I understand this will delete all documents"):
             with st.spinner("Deleting documents..."):
                 result = st.session_state.rag_interface.delete_documents()
-                
+
                 if "error" not in result:
                     if result.get("success"):
                         st.sidebar.success("✅ All documents deleted")
@@ -215,14 +213,14 @@ def display_document_management():
 def display_query_settings():
     """Display query settings"""
     st.sidebar.header("⚙️ Query Settings")
-    
+
     retrieval_mode = st.sidebar.selectbox(
         "Retrieval Mode",
         ["hybrid", "elser_only", "bm25_only"],
         index=0,
         help="Choose the retrieval strategy"
     )
-    
+
     top_k = st.sidebar.slider(
         "Number of Documents",
         min_value=1,
@@ -230,30 +228,30 @@ def display_query_settings():
         value=5,
         help="Number of documents to retrieve"
     )
-    
+
     return retrieval_mode, top_k
 
 def display_chat_interface():
     """Display the main chat interface"""
     st.markdown('<div class="main-header">🤖 RAG System - Document Q&A</div>', unsafe_allow_html=True)
-    
+
     # Description
     st.markdown("""
     Welcome to the RAG (Retrieval-Augmented Generation) system! Ask questions about your uploaded documents 
     and get accurate, cited answers.
-    
+
     **Features:**
     - 🔍 Hybrid search combining BM25, dense vectors, and ELSER
     - 📚 Google Drive integration for document ingestion
     - 🛡️ Built-in guardrails for safe and grounded responses
     - 📎 Automatic citations with source links
     """)
-    
+
     # Display conversation history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            
+
             # Display citations if available
             if message["role"] == "assistant" and "citations" in message:
                 display_citations(message["citations"])
@@ -262,10 +260,10 @@ def display_citations(citations: List[Dict]):
     """Display citations in a formatted way"""
     if not citations:
         return
-    
+
     st.markdown("**Sources:**")
     for citation in citations:
-        with st.expander(f"📄 {citation['filename']} (Page {citation['page_number']})"):
+        with st.expander(f"📄 {citation['filename']} (Page {citation.get('page_number', '?')})"):
             st.markdown(f"**Relevance Score:** {citation.get('relevance_score', 0):.3f}")
             st.markdown(f"**Snippet:** {citation['snippet']}")
             if citation.get('url') and citation['url'] != '#':
@@ -274,27 +272,27 @@ def display_citations(citations: List[Dict]):
 def main():
     """Main application"""
     initialize_session_state()
-    
+
     # Sidebar
     display_system_status()
     display_document_management()
     retrieval_mode, top_k = display_query_settings()
-    
+
     # Main interface
     display_chat_interface()
-    
+
     # Chat input
     if prompt := st.chat_input("Ask a question about your documents..."):
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
+
         with st.chat_message("user"):
             st.markdown(prompt)
-        
+
         # Generate response
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
-            
+
             with st.spinner("Thinking..."):
                 # Query the RAG system
                 result = st.session_state.rag_interface.query_documents(
@@ -302,16 +300,16 @@ def main():
                     retrieval_mode=retrieval_mode,
                     top_k=top_k
                 )
-                
+
                 if "error" not in result:
                     if result.get("success"):
                         answer = result["answer"]
                         citations = result.get("citations", [])
                         metadata = result.get("metadata", {})
-                        
+
                         # Display answer
                         message_placeholder.markdown(answer)
-                        
+
                         # Display metadata
                         with st.expander("🔍 Query Details"):
                             col1, col2, col3 = st.columns(3)
@@ -322,11 +320,11 @@ def main():
                             with col3:
                                 safety_status = "✅ Safe" if metadata.get("is_safe", False) else "⚠️ Filtered"
                                 st.metric("Safety", safety_status)
-                        
+
                         # Display citations
                         if citations:
                             display_citations(citations)
-                        
+
                         # Add assistant message to chat history
                         st.session_state.messages.append({
                             "role": "assistant",
@@ -334,7 +332,7 @@ def main():
                             "citations": citations,
                             "metadata": metadata
                         })
-                        
+
                     else:
                         error_msg = f"Query failed: {result.get('answer', 'Unknown error')}"
                         message_placeholder.error(error_msg)
@@ -343,7 +341,7 @@ def main():
                     error_msg = f"API Error: {result['error']}"
                     message_placeholder.error(error_msg)
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
-    
+
     # Footer
     st.markdown("---")
     st.markdown("""
