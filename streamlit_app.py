@@ -84,9 +84,14 @@ class RAGInterface:
                 raise ValueError(f"Unsupported method: {method}")
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.ConnectionError:
+            return {"error": "Cannot connect to the API server. Please make sure the FastAPI server is running."}
+        except requests.exceptions.Timeout:
+            return {"error": "Request timed out. Please try again."}
+        except requests.exceptions.HTTPError as e:
+            return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
         except Exception as e:
-            return {"error": str(e)}
-
+            return {"error": f"Unexpected error: {str(e)}"}
     def ingest_documents(self, files) -> Dict[str, Any]:
         file_data = []
         for uploaded_file in files:
@@ -127,7 +132,7 @@ def main():
     st.markdown('<div class="main-header">📄 Upload Documents (Max 20 PDF files)</div>', unsafe_allow_html=True)
     initialize_session_state()
     display_system_status()
-    
+
     uploaded_files = st.file_uploader(
         label="Upload PDF Documents",
         type=["pdf"],
@@ -140,8 +145,7 @@ def main():
             st.error("You can upload a maximum of 20 files at a time. Please reduce the number of files.")
             return
         st.session_state.uploaded_files = uploaded_files
-
-    if st.button("📤 Upload & Process") and st.session_state.uploaded_files:
+    if st.button("📤 Upload & Process", key="upload_process_btn") and st.session_state.uploaded_files:
         with st.spinner("Uploading and processing documents..."):
             result = st.session_state.rag_interface.ingest_documents(st.session_state.uploaded_files)
             if "error" not in result:
@@ -151,7 +155,9 @@ def main():
                     st.error(f"❌ {result['message']}")
             else:
                 st.error(f"❌ Error: {result['error']}")
-    elif st.button("📤 Upload & Process"):
+    elif st.button("Upload Warning Placeholder", key="upload_warn_btn"):
+        # This branch only triggers if user presses button without files;
+        # to avoid duplicate StreamlitDuplicateElementId error
         st.warning("Please upload PDF files before processing.")
 
 if __name__ == "__main__":
